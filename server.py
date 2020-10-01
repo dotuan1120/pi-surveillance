@@ -1,5 +1,3 @@
-# import the necessary packages
-
 import time
 import pyrebase
 import os
@@ -13,6 +11,7 @@ import imutils
 import cv2
 import shutil
 
+# convert the video from avi format to mp4 format
 def convert_avi_to_mp4(avi_file_path, output_name):
     pro = os.popen(
         "ffmpeg -i '{input}' -ac 2 -b:v 2000k -c:a aac -c:v libx264 -b:a 160k -vprofile high -bf 0 -strict "
@@ -21,7 +20,9 @@ def convert_avi_to_mp4(avi_file_path, output_name):
     pro.read()
     return True
 
-
+# Convert the video from avi format to mp4 format
+# Upload videos to the Firebase Cloud Storage
+# Move the videos to the local directory
 def handle_outputs(video_name_avi, image_name, date, time):
     # Initialize video name and paths
     video_name_mp4 = "({ts}).mp4".format(ts=time)
@@ -37,6 +38,7 @@ def handle_outputs(video_name_avi, image_name, date, time):
     # Move video and images to the local storage and delete the avi file
     move_file(video_name_avi, video_name_mp4, image_name, local_storage_path)
 
+# Create a local directory to store videos and images
 def create_dir(date):
     parent_dir = "/home/tuan/Downloads/pi-surveillance"
     path = os.path.join(parent_dir, date)
@@ -46,7 +48,7 @@ def create_dir(date):
     except OSError as error:
         print(error)
 
-
+# Move the file to the destination directory
 def move_file(video_name_avi, video_name_mp4, image_name, local_storage_path):
     try:
         os.remove(video_name_avi)
@@ -56,7 +58,7 @@ def move_file(video_name_avi, video_name_mp4, image_name, local_storage_path):
     except OSError as error:
         print(error)
 
-
+# Firebase configuration
 config = {
     "apiKey": "AIzaSyDzALNGaFzBfKTwQiEvht1brD5KxVqGyEE",
     "authDomain": "pi-surveillance-9dc05.firebaseapp.com",
@@ -66,6 +68,8 @@ config = {
     "messagingSenderId": "408628332478",
     "appId": "1:408628332478:web:4b1ac996f34981136d9bef"
 };
+
+# Initialize the Firebase services
 firebase = pyrebase.initialize_app(config)
 db = firebase.database()
 storage = firebase.storage()
@@ -89,8 +93,8 @@ if __name__ == '__main__':
     # initialize the ImageHub object
     imageHub = imagezmq.ImageHub()
 
-    # initialize the list of class labels MobileNet SSD was trained to
-    # detect, then generate a set of bounding box colors for each class
+    # initialize the list of class labels MobileNet SSD was trained to detect,
+    # then generate a set of bounding box colors for each class
     CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
                "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
                "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
@@ -100,121 +104,109 @@ if __name__ == '__main__':
     print("[INFO] loading model...")
     net = cv2.dnn.readNetFromCaffe(args["prototxt"], args["model"])
 
-    # initialize the consider set (class labels we care about and want
-    # to count), the object count dictionary, and the frame  dictionary
-    # --------OLD---------
-    CONSIDER = set(["dog", "person", "car"])
-    # objCount = {obj: 0 for obj in CONSIDER}
+    # initialize the frame dictionary
     frameDict = {}
 
-    # initialize the dictionary which will contain  information regarding
-    # when a device was last active, then store the last time the check
-    # was made was now
-    lastActive = {}
-    lastActiveCheck = datetime.datetime.now()
-
-    # stores the estimated number of Pis, active checking period, and
-    # calculates the duration seconds to wait before making a check to
-    # see if a device was active
-    ESTIMATED_NUM_PIS = 4
-    ACTIVE_CHECK_PERIOD = 10
-    ACTIVE_CHECK_SECONDS = ESTIMATED_NUM_PIS * ACTIVE_CHECK_PERIOD
-
-    # assign montage width and height so we can view all incoming frames
-    # in a single "dashboard"
+    # assign montage width and height of the video interface
     mW = args["montageW"]
     mH = args["montageH"]
-    # print("[INFO] detecting: {}...".format(", ".join(obj for obj in
-    # 	CONSIDER)))
 
+
+    frame_counter = 0
     # start looping over all the frames
-
-    m = 0
-    p = False
     while True:
-        # receive RPi name and frame from the RPi and acknowledge
-        # the receipt
+        # receive Pi name and frame from the RPi and send REPLY to the Pi
         (rpiName, frame) = imageHub.recv_image()
         imageHub.send_reply(b'OK')
 
-        # if a device is not in the last active dictionary then it means
-        # that its a newly connected device
-        if rpiName not in lastActive.keys():
-            print("[INFO] receiving data from {}...".format(rpiName))
-
-        # record the last active time for the device from which we just
-        # received a frame
-        lastActive[rpiName] = datetime.datetime.now()
-
-        # resize the frame to have a maximum width of 400 pixels, then
-        # grab the frame dimensions and construct a blob
-        frame = imutils.resize(frame, width=800)
+        # resize the frame to have a maximum width of 600 pixels
+        # construct a blob using the frame dimensions
+        frame = imutils.resize(frame, width=600)
         (h, w) = frame.shape[:2]
         size = (w, h)
         blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)),
                                      0.007843, (300, 300), 127.5)
 
-        # pass the blob through the network and obtain the detections and
-        # predictions
+        # pass the blob through the network and obtain the detections and predictions
         net.setInput(blob)
         detections = net.forward()
 
-        # reset the object count for each object in the CONSIDER set
-        # objCount = {obj: 0 for obj in CONSIDER}
+        # detected variable is True when there is human in the frame, otherwise is False
         detected = False
+
         # loop over the detections
         for i in np.arange(0, detections.shape[2]):
-            # extract the confidence (i.e., probability) associated with
-            # the prediction
+            # extract the confidence (i.e., probability) associated with the prediction
             confidence = detections[0, 0, i, 2]
 
-            # filter out weak detections by ensuring the confidence is
-            # greater than the minimum confidence
+            # check if the confidence is greater than the minimum confidence
+            # and the detection contains human presence
             if confidence > args["confidence"] and int(detections[0, 0, i, 1]) == 15:
 
                 detected = True
+
                 # extract the index of the class label from the detections
                 idx = int(detections[0, 0, i, 1])
-                if m == 10:
+
+                # if there are 10 consecutive frames containing human(s)
+                if frame_counter == 10:
+
+                    # Creat the date and time
                     date = datetime.datetime.now().strftime("%d-%b-%Y")
                     time = datetime.datetime.now().strftime("%H:%M:%S")
+
                     # Create a storage directory which its name is the date
                     create_dir(date)
+
                     # Upload the image first
                     image_name = '({ts}).jpg'.format(ts=time)
                     cv2.imwrite(image_name, frame)
                     image_cloud_path = 'images/{date}/{img}'.format(date=date, img=image_name)
                     storage.child(image_cloud_path).put(image_name)
                     imgRef = storage.child('images/{date}/{img}'.format(date=date, img=image_name)).get_url(None)
+
                     # Update name and image in Realtime Database
                     db.child("surveillance").child(date).child(time).update({"image": imgRef})
                     db.child("surveillance").child(date).child(time).update({"name": time})
+
                     # Initialize a video object
                     video_name_avi = "({ts}).avi".format(ts=time)
                     result = cv2.VideoWriter(video_name_avi, cv2.VideoWriter_fourcc(*'MJPG'), 10, size)
+
                     print("begin to record")
-                    m += 1
-                elif m > 10:
+                    frame_counter += 1
+                # If there are more than 10 consecutive frames containing human(s), begin to record the video
+                elif frame_counter > 10:
 
                     result.write(frame)
-                    if m > 110:
-                        m = 0
+
+                    # if there are more than 100 consecutive frames containing human(s),
+                    # reset frame counter to stop recording, and handle the video
+                    if frame_counter > 110:
+                        frame_counter = 0
                         print("end recording")
+
                         # upload video to cloud storage
                         handle_outputs(video_name_avi, image_name, date, time)
                     else:
-                        m += 1
-
+                        frame_counter += 1
                 else:
-                    m += 1
+                    frame_counter += 1
+
+        # If there is no human in the current frame
         if detected is False:
-            if m > 10:
+
+            # reset frame counter to stop recording, and handle the video if the program are recording
+            if frame_counter > 10:
+
                 # upload video to cloud storage
                 handle_outputs(video_name_avi, image_name, date, time)
-                m = 0
+                frame_counter = 0
+
+            # reset frame counter if there are less than 10 consecutive frames containing human
             else:
-                m = 0
-        print("m = ", m)
+                frame_counter = 0
+        print("frame_counter = ", frame_counter)
 
         # update the new frame in the frame dictionary
         frameDict[rpiName] = frame
@@ -227,12 +219,12 @@ if __name__ == '__main__':
             cv2.imshow("Monitor ({})".format(i),
                        montage)
 
-        # detect any kepresses
+        # detect any key pressed
         key = cv2.waitKey(1) & 0xFF
 
         # if the `q` key was pressed, break from the loop
         if key == ord("q"):
             break
 
-    # do a bit of cleanup
+    # Cleanup
     cv2.destroyAllWindows()
